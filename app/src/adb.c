@@ -389,3 +389,41 @@ adb_get_serialno(struct sc_intr *intr, unsigned flags) {
 
     return strdup(buf);
 }
+
+char *
+adb_get_device_ip(struct sc_intr *intr, const char *serial, unsigned flags) {
+    const char *const cmd[] = {"shell", "ip", "route"};
+
+    sc_pipe pout;
+    sc_pid pid = adb_execute_p(serial, cmd, ARRAY_LEN(cmd), flags, &pout);
+    if (pid == SC_PROCESS_NONE) {
+        LOGD("Could not execute \"ip route\"");
+        return NULL;
+    }
+
+    char buf[128]; // Large enough to contain "xxx.xxx.xxx.xxx"
+    ssize_t r = sc_pipe_read_all_intr(intr, pid, pout, buf, sizeof(buf));
+    sc_pipe_close(pout);
+
+    bool ok = process_check_success_intr(intr, pid, "ip route", flags);
+    if (!ok) {
+        return NULL;
+    }
+
+    if (r == -1) {
+        return false;
+    }
+
+    sc_str_truncate(buf, r, "\r\n");
+
+    // The result looks like
+    // "192.168.1.0/24 dev wlan0  proto kernel  scope link  src 192.168.x.x"
+    ssize_t idx = sc_str_index_of_column(buf, 8, " ");
+    if (idx == -1) {
+        return NULL;
+    }
+
+    char *ip = &buf[idx];
+    sc_str_truncate(ip, r - idx, " \t");
+    return strdup(ip);
+}
